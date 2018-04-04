@@ -1,68 +1,48 @@
-/*
- * Copyright (c) 2010-2013, MoPub Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *  Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- *
- *  Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the distribution.
- *
- *  Neither the name of 'MoPub Inc.' nor the names of its contributors
- *   may be used to endorse or promote products derived from this software
- *   without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 package com.mopub.mobileads;
 
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.view.TextureView;
 import android.view.View;
 import android.widget.ImageView;
 
+import com.mopub.common.Constants;
 import com.mopub.common.MoPubBrowser;
-import com.mopub.mobileads.test.support.SdkTestRunner;
-import com.mopub.mobileads.util.vast.VastVideoConfiguration;
+import com.mopub.common.test.support.SdkTestRunner;
+import com.mopub.mraid.MraidVideoViewController;
+import com.mopub.nativeads.NativeFullScreenVideoView;
+import com.mopub.nativeads.NativeVideoController;
+import com.mopub.nativeads.NativeVideoViewController;
 
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.Shadows;
+import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowActivity;
 
+import java.lang.reflect.Constructor;
+
+import static com.mopub.common.DataKeys.BROADCAST_IDENTIFIER_KEY;
 import static org.fest.assertions.api.Assertions.assertThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.withSettings;
-import static org.robolectric.Robolectric.shadowOf;
 
 @RunWith(SdkTestRunner.class)
+@Config(constants = BuildConfig.class)
 public class MraidVideoPlayerActivityTest {
     private static final String VAST = "vast";
     private static final String MRAID = "mraid";
+    private static final String NATIVE_VIDEO_VIEW_CONTROLLER =
+            "com.mopub.nativeads.NativeVideoViewController";
 
     private MraidVideoPlayerActivity subject;
     private long testBroadcastIdentifier;
@@ -72,14 +52,11 @@ public class MraidVideoPlayerActivityTest {
 
     @Before
     public void setup() {
-        context = new Activity();
+        context = Robolectric.buildActivity(Activity.class).create().get();
         intent = new Intent(context, MraidVideoPlayerActivity.class);
 
         testBroadcastIdentifier = 1001;
-        AdConfiguration adConfiguration = mock(AdConfiguration.class, withSettings().serializable());
-        when(adConfiguration.getBroadcastIdentifier()).thenReturn(testBroadcastIdentifier);
-        intent.putExtra(AdFetcher.AD_CONFIGURATION_KEY, adConfiguration);
-
+        intent.putExtra(BROADCAST_IDENTIFIER_KEY, testBroadcastIdentifier);
         baseVideoViewController = mock(BaseVideoViewController.class);
     }
 
@@ -95,6 +72,13 @@ public class MraidVideoPlayerActivityTest {
         initializeSubjectForMraid();
 
         assertThat(subject.getBaseVideoViewController()).isInstanceOf(MraidVideoViewController.class);
+    }
+
+    @Test
+    public void onCreate_withNativeExtraKey_shouldUseNativeVideoViewController() throws Exception {
+        initializeSubjectForNative();
+
+        assertThat(subject.getBaseVideoViewController()).isInstanceOf(NativeVideoViewController.class);
     }
 
     @Ignore("pending: this is currently impossible to write")
@@ -154,7 +138,7 @@ public class MraidVideoPlayerActivityTest {
 
         subject.onSetContentView(expectedView);
 
-        assertThat(shadowOf(subject).getContentView()).isEqualTo(expectedView);
+        assertThat(Shadows.shadowOf(subject).getContentView()).isEqualTo(expectedView);
     }
 
     @Test
@@ -184,10 +168,11 @@ public class MraidVideoPlayerActivityTest {
 
         subject.onStartActivityForResult(MoPubBrowser.class, 100, expectedExtras);
 
-        final ShadowActivity.IntentForResult intentForResult = shadowOf(subject).getNextStartedActivityForResult();
+        final ShadowActivity.IntentForResult intentForResult = Shadows.shadowOf(subject).getNextStartedActivityForResult();
 
         assertThat(intentForResult.intent.getComponent().getClassName()).isEqualTo("com.mopub.common.MoPubBrowser");
-        assertThat(intentForResult.intent.getExtras()).isEqualTo(expectedExtras);
+        assertThat(intentForResult.intent.getExtras().getString("hello")).isEqualTo(expectedExtras.getString("hello"));
+        assertThat(intentForResult.intent.getExtras().size()).isEqualTo(expectedExtras.size());
         assertThat(intentForResult.requestCode).isEqualTo(100);
     }
 
@@ -197,27 +182,59 @@ public class MraidVideoPlayerActivityTest {
 
         subject.onStartActivityForResult(null, 100, new Bundle());
 
-        final ShadowActivity.IntentForResult intentForResult = shadowOf(subject).getNextStartedActivityForResult();
+        final ShadowActivity.IntentForResult intentForResult = Shadows.shadowOf(subject).getNextStartedActivityForResult();
         assertThat(intentForResult).isNull();
+    }
+
+    @Test
+    public void createVideoViewController_withNativeVideoViewControllerReflectionConstructor_shouldExist() throws Exception {
+        final Class<?> nativeVideoViewController = Class.forName(NATIVE_VIDEO_VIEW_CONTROLLER);
+        final Constructor<?> declaredConstructor = nativeVideoViewController.getDeclaredConstructor(
+                Context.class, Bundle.class, Bundle.class,
+                BaseVideoViewController.BaseVideoViewControllerListener.class);
+
+        assertThat(declaredConstructor).isNotNull();
     }
 
     private void initializeSubjectForMraid() {
         intent.putExtra(BaseVideoPlayerActivity.VIDEO_CLASS_EXTRAS_KEY, "mraid");
 
-        subject = Robolectric.buildActivity(MraidVideoPlayerActivity.class)
-                .withIntent(intent)
+        subject = Robolectric.buildActivity(MraidVideoPlayerActivity.class, intent)
                 .create()
                 .get();
     }
 
     private void initializeSubjectForVast() {
         intent.putExtra(BaseVideoPlayerActivity.VIDEO_CLASS_EXTRAS_KEY, "vast");
-        VastVideoConfiguration vastVideoConfiguration = new VastVideoConfiguration();
-        vastVideoConfiguration.setDiskMediaFileUrl("video_path");
-        intent.putExtra(VastVideoViewController.VAST_VIDEO_CONFIGURATION, vastVideoConfiguration);
+        VastVideoConfig vastVideoConfig = new VastVideoConfig();
+        vastVideoConfig.setDiskMediaFileUrl("video_path");
+        intent.putExtra(VastVideoViewController.VAST_VIDEO_CONFIG, vastVideoConfig);
 
-        subject = Robolectric.buildActivity(MraidVideoPlayerActivity.class)
-                .withIntent(intent)
+        subject = Robolectric.buildActivity(MraidVideoPlayerActivity.class, intent)
+                .create()
+                .get();
+    }
+
+    private void initializeSubjectForNative() {
+        intent.putExtra(BaseVideoPlayerActivity.VIDEO_CLASS_EXTRAS_KEY, "native");
+
+        NativeFullScreenVideoView mockFullScreenVideoView = mock(NativeFullScreenVideoView.class);
+        NativeVideoController mockVideoController = mock(NativeVideoController.class);
+        VastVideoConfig mockVastVideoConfig = mock(VastVideoConfig.class);
+        TextureView mockTextureView = mock(TextureView.class);
+        Bitmap mockBitmap = mock(Bitmap.class);
+
+        when(mockVastVideoConfig.getCustomCtaText()).thenReturn("Learn More");
+        when(mockFullScreenVideoView.getTextureView()).thenReturn(mockTextureView);
+        when(mockTextureView.getBitmap()).thenReturn(mockBitmap);
+
+        Bundle additionalExtras = new Bundle();
+        additionalExtras.putSerializable(Constants.NATIVE_VAST_VIDEO_CONFIG, mockVastVideoConfig);
+        additionalExtras.putLong(Constants.NATIVE_VIDEO_ID, 123);
+        NativeVideoController.setForId(123, mockVideoController);
+        intent.putExtras(additionalExtras);
+
+        subject = Robolectric.buildActivity(MraidVideoPlayerActivity.class, intent)
                 .create()
                 .get();
     }

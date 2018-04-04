@@ -1,118 +1,100 @@
-/*
- * Copyright (c) 2010-2013, MoPub Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *  Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- *
- *  Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the distribution.
- *
- *  Neither the name of 'MoPub Inc.' nor the names of its contributors
- *   may be used to endorse or promote products derived from this software
- *   without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 package com.mopub.mobileads;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
-import android.location.Location;
 import android.net.ConnectivityManager;
-import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
-import android.webkit.WebView;
 import android.widget.FrameLayout;
 
-import com.mopub.common.GpsHelper;
-import com.mopub.common.GpsHelperTest;
-import com.mopub.common.MoPub;
-import com.mopub.common.SharedPreferencesHelper;
+import com.mopub.common.AdFormat;
+import com.mopub.common.test.support.SdkTestRunner;
+import com.mopub.common.util.Reflection;
 import com.mopub.common.util.test.support.TestMethodBuilderFactory;
-import com.mopub.mobileads.factories.HttpClientFactory;
-import com.mopub.mobileads.test.support.SdkTestRunner;
-import com.mopub.mobileads.test.support.TestAdFetcherFactory;
-import com.mopub.mobileads.test.support.TestHttpResponseWithHeaders;
 import com.mopub.mobileads.test.support.ThreadUtils;
+import com.mopub.network.AdRequest;
+import com.mopub.network.AdResponse;
+import com.mopub.network.MoPubNetworkError;
+import com.mopub.network.MoPubRequestQueue;
+import com.mopub.network.Networking;
+import com.mopub.volley.NetworkResponse;
+import com.mopub.volley.NoConnectionError;
+import com.mopub.volley.Request;
+import com.mopub.volley.VolleyError;
 
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.conn.ClientConnectionManager;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
 import org.robolectric.Robolectric;
-import org.robolectric.tester.org.apache.http.FakeHttpLayer;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
+import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowLooper;
 
-import java.lang.reflect.InvocationTargetException;
+import java.util.Collections;
+import java.util.Map;
 
-import static android.Manifest.permission.ACCESS_NETWORK_STATE;
-import static com.mopub.common.util.Reflection.MethodBuilder;
-import static com.mopub.mobileads.AdViewController.DEFAULT_REFRESH_TIME_MILLISECONDS;
-import static com.mopub.mobileads.MoPubErrorCode.INTERNAL_ERROR;
-import static com.mopub.mobileads.MoPubErrorCode.NO_FILL;
-import static com.mopub.mobileads.test.support.ThreadUtils.NETWORK_DELAY;
+import static com.mopub.common.VolleyRequestMatcher.isUrl;
 import static org.fest.assertions.api.Assertions.assertThat;
-import static org.fest.assertions.api.Fail.fail;
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyMap;
 import static org.mockito.Matchers.anyString;
+import static org.mockito.Matchers.argThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.stub;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
-import static org.robolectric.Robolectric.application;
-import static org.robolectric.Robolectric.shadowOf;
+
 
 @RunWith(SdkTestRunner.class)
+@Config(constants = BuildConfig.class)
 public class AdViewControllerTest {
+
+    private static final int[] HTML_ERROR_CODES = new int[]{400, 401, 402, 403, 404, 405, 407, 408,
+            409, 410, 411, 412, 413, 414, 415, 416, 417, 500, 501, 502, 503, 504, 505};
+
     private AdViewController subject;
-    private MoPubView moPubView;
-    private HttpResponse response;
-    private HttpClient httpClient;
-    private AdFetcher adFetcher;
-    private MethodBuilder methodBuilder;
-    private Activity context;
+    @Mock private MoPubView mockMoPubView;
+    @Mock private MoPubRequestQueue mockRequestQueue;
+    private Reflection.MethodBuilder methodBuilder;
+
+    private AdResponse response;
+    private Activity activity;
 
     @Before
     public void setup() {
-        context = new Activity();
-        shadowOf(context).grantPermissions(ACCESS_NETWORK_STATE);
+        activity = Robolectric.buildActivity(Activity.class).create().get();
+        Shadows.shadowOf(activity).grantPermissions(android.Manifest.permission.ACCESS_NETWORK_STATE);
 
-        moPubView = mock(MoPubView.class);
-        stub(moPubView.getContext()).toReturn(context);
+        when(mockMoPubView.getAdFormat()).thenReturn(AdFormat.BANNER);
+        when(mockMoPubView.getContext()).thenReturn(activity);
+        Networking.setRequestQueueForTesting(mockRequestQueue);
 
-        httpClient = HttpClientFactory.create();
+        subject = new AdViewController(activity, mockMoPubView);
 
-        subject = new AdViewController(context, moPubView);
-        response = new TestHttpResponseWithHeaders(200, "I ain't got no-body");
-        adFetcher = TestAdFetcherFactory.getSingletonMock();
         methodBuilder = TestMethodBuilderFactory.getSingletonMock();
         reset(methodBuilder);
+        response = new AdResponse.Builder()
+                .setCustomEventClassName("customEvent")
+                .setClickTrackingUrl("clickUrl")
+                .setImpressionTrackingUrl("impressionUrl")
+                .setRedirectUrl("redirectUrl")
+                .setScrollable(false)
+                .setDimensions(320, 50)
+                .setAdType("html")
+                .setFailoverUrl("failUrl")
+                .setResponseBody("testResponseBody")
+                .setServerExtras(Collections.<String, String>emptyMap())
+                .build();
     }
 
     @After
@@ -121,109 +103,165 @@ public class AdViewControllerTest {
     }
 
     @Test
-    public void scheduleRefreshTimerIfEnabled_shouldCancelOldRefreshAndScheduleANewOne() throws Exception {
-        response.addHeader("X-Refreshtime", "30");
-        subject.configureUsingHttpResponse(response);
-        Robolectric.pauseMainLooper();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+    public void cleanup_shouldNotHoldViewOrUrlGenerator() {
+        subject.cleanup();
 
-        subject.scheduleRefreshTimerIfEnabled();
-
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
-
-        subject.scheduleRefreshTimerIfEnabled();
-
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+        assertThat(subject.getMoPubView()).isNull();
+        assertThat(subject.generateAdUrl()).isNull();
     }
 
     @Test
-    public void scheduleRefreshTimer_shouldNotScheduleRefreshIfAutorefreshIsOff() throws Exception {
-        response.addHeader("X-Refreshtime", "30");
-        subject.configureUsingHttpResponse(response);
+    public void adDidFail_shouldScheduleRefreshTimer_shouldCallMoPubViewAdFailed() throws Exception {
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
 
-        Robolectric.pauseMainLooper();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        subject.adDidFail(MoPubErrorCode.ADAPTER_CONFIGURATION_ERROR);
 
-        subject.forceSetAutorefreshEnabled(false);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
+        verify(mockMoPubView).adFailed(MoPubErrorCode.ADAPTER_CONFIGURATION_ERROR);
+    }
+
+    @Test
+    public void adDidFail_withNullMoPubView_shouldNotScheduleRefreshTimer_shouldNotCallMoPubViewAdFailed() throws Exception {
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
+
+        // This sets the MoPubView to null
+        subject.cleanup();
+        subject.adDidFail(MoPubErrorCode.ADAPTER_CONFIGURATION_ERROR);
+
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
+        verify(mockMoPubView, never()).adFailed(any(MoPubErrorCode.class));
+    }
+
+
+    @Test
+    public void scheduleRefreshTimer_shouldNotScheduleIfRefreshTimeIsNull() throws Exception {
+        response = response.toBuilder().setRefreshTimeMilliseconds(null).build();
+        subject.onAdLoadSuccess(response);
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
 
         subject.scheduleRefreshTimerIfEnabled();
 
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
+    }
+
+    @Test
+    public void scheduleRefreshTimer_shouldNotScheduleIfRefreshTimeIsZero() {
+        response = response.toBuilder().setRefreshTimeMilliseconds(0).build();
+        subject.onAdLoadSuccess(response);
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
+
+        subject.scheduleRefreshTimerIfEnabled();
+
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
+    }
+
+    @Test
+    public void scheduleRefreshTimerIfEnabled_shouldCancelOldRefreshAndScheduleANewOne() throws Exception {
+        response = response.toBuilder().setRefreshTimeMilliseconds(30).build();
+        subject.onAdLoadSuccess(response);
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
+
+        subject.scheduleRefreshTimerIfEnabled();
+
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
+
+        subject.scheduleRefreshTimerIfEnabled();
+
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
+    }
+
+    @Test
+    public void scheduleRefreshTimer_shouldNotScheduleRefreshIfAutoRefreshIsOff() throws Exception {
+        response = response.toBuilder().setRefreshTimeMilliseconds(30).build();
+        subject.onAdLoadSuccess(response);
+
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
+
+        subject.setShouldAllowAutoRefresh(false);
+
+        subject.scheduleRefreshTimerIfEnabled();
+
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
     }
 
     @Test
     public void scheduleRefreshTimer_whenAdViewControllerNotConfiguredByResponse_shouldHaveDefaultRefreshTime() throws Exception {
-        Robolectric.pauseMainLooper();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        ShadowLooper.pauseMainLooper();
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
 
         subject.scheduleRefreshTimerIfEnabled();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
 
-        Robolectric.idleMainLooper(DEFAULT_REFRESH_TIME_MILLISECONDS - 1);
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+        ShadowLooper.idleMainLooper(AdViewController.DEFAULT_REFRESH_TIME_MILLISECONDS - 1);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
 
-        Robolectric.idleMainLooper(1);
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        ShadowLooper.idleMainLooper(1);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
     }
 
     @Test
-    public void scheduleRefreshTimer_shouldNotScheduleRefreshIfRefreshTimeIsZero() throws Exception {
-//        response.addHeader("X-Refreshtime", "0");
-        subject.configureUsingHttpResponse(response);
-        Robolectric.pauseMainLooper();
+    public void setShouldAllowAutoRefresh_shouldSetCurrentAutoRefreshStatus() throws Exception {
+        assertThat(subject.getCurrentAutoRefreshStatus()).isTrue();
 
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        subject.setShouldAllowAutoRefresh(false);
+        assertThat(subject.getCurrentAutoRefreshStatus()).isFalse();
 
-        subject.scheduleRefreshTimerIfEnabled();
-
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
-    }
-    
-    @Test
-    public void forceSetAutoRefreshEnabled_shouldSetAutoRefreshSetting() throws Exception {
-        assertThat(subject.getAutorefreshEnabled()).isTrue();
-
-        subject.forceSetAutorefreshEnabled(false);
-        assertThat(subject.getAutorefreshEnabled()).isFalse();
-
-        subject.forceSetAutorefreshEnabled(true);
-        assertThat(subject.getAutorefreshEnabled()).isTrue();
+        subject.setShouldAllowAutoRefresh(true);
+        assertThat(subject.getCurrentAutoRefreshStatus()).isTrue();
     }
 
     @Test
-    public void pauseRefresh_shouldDisableAutorefresh() throws Exception {
-        assertThat(subject.getAutorefreshEnabled()).isTrue();
+    public void pauseRefresh_shouldDisableAutoRefresh() throws Exception {
+        assertThat(subject.getCurrentAutoRefreshStatus()).isTrue();
 
         subject.pauseRefresh();
-        assertThat(subject.getAutorefreshEnabled()).isFalse();
+        assertThat(subject.getCurrentAutoRefreshStatus()).isFalse();
     }
 
     @Test
-    public void unpauseRefresh_afterUnpauseRefresh_shouldEnableRefresh() throws Exception {
+    public void resumeRefresh_afterPauseRefresh_shouldEnableRefresh() throws Exception {
         subject.pauseRefresh();
-        
-        subject.unpauseRefresh();
-        assertThat(subject.getAutorefreshEnabled()).isTrue();
+
+        subject.resumeRefresh();
+        assertThat(subject.getCurrentAutoRefreshStatus()).isTrue();
     }
 
     @Test
-    public void pauseAndUnpauseRefresh_withRefreshForceDisabled_shouldAlwaysHaveRefreshFalse() throws Exception {
-        subject.forceSetAutorefreshEnabled(false);
-        assertThat(subject.getAutorefreshEnabled()).isFalse();
+    public void pauseAndResumeRefresh_withShouldAllowAutoRefreshFalse_shouldAlwaysHaveRefreshFalse() throws Exception {
+        subject.setShouldAllowAutoRefresh(false);
+        assertThat(subject.getCurrentAutoRefreshStatus()).isFalse();
 
         subject.pauseRefresh();
-        assertThat(subject.getAutorefreshEnabled()).isFalse();
+        assertThat(subject.getCurrentAutoRefreshStatus()).isFalse();
 
-        subject.unpauseRefresh();
-        assertThat(subject.getAutorefreshEnabled()).isFalse();
+        subject.resumeRefresh();
+        assertThat(subject.getCurrentAutoRefreshStatus()).isFalse();
+    }
+
+    @Test
+    public void multiplePausesBeforeResumeRefresh_shouldEnableAutoRefresh() {
+        assertThat(subject.getCurrentAutoRefreshStatus()).isTrue();
+
+        subject.pauseRefresh();
+        subject.pauseRefresh();
+        subject.resumeRefresh();
+
+        assertThat(subject.getCurrentAutoRefreshStatus()).isTrue();
     }
 
     @Test
     public void enablingAutoRefresh_afterLoadAd_shouldScheduleNewRefreshTimer() throws Exception {
+
         final AdViewController adViewControllerSpy = spy(subject);
 
         adViewControllerSpy.loadAd();
-        adViewControllerSpy.forceSetAutorefreshEnabled(true);
+        adViewControllerSpy.setShouldAllowAutoRefresh(true);
         verify(adViewControllerSpy).scheduleRefreshTimerIfEnabled();
     }
 
@@ -231,253 +269,93 @@ public class AdViewControllerTest {
     public void enablingAutoRefresh_withoutCallingLoadAd_shouldNotScheduleNewRefreshTimer() throws Exception {
         final AdViewController adViewControllerSpy = spy(subject);
 
-        adViewControllerSpy.forceSetAutorefreshEnabled(true);
+        adViewControllerSpy.setShouldAllowAutoRefresh(true);
         verify(adViewControllerSpy, never()).scheduleRefreshTimerIfEnabled();
     }
 
     @Test
     public void disablingAutoRefresh_shouldCancelRefreshTimers() throws Exception {
-        response.addHeader("X-Refreshtime", "30");
-        subject.configureUsingHttpResponse(response);
-
-        Robolectric.pauseMainLooper();
+        response = response.toBuilder().setRefreshTimeMilliseconds(30).build();
+        subject.onAdLoadSuccess(response);
+        ShadowLooper.pauseMainLooper();
 
         subject.loadAd();
-        subject.forceSetAutorefreshEnabled(true);
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+        subject.setShouldAllowAutoRefresh(true);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
 
-        subject.forceSetAutorefreshEnabled(false);
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        subject.setShouldAllowAutoRefresh(false);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
     }
 
     @Test
-    public void trackImpression_shouldHttpGetTheImpressionUrl() throws Exception {
-        response.addHeader("X-Imptracker", "http://trackingUrl");
-        subject.configureUsingHttpResponse(response);
-        String expectedUserAgent = new WebView(context).getSettings().getUserAgentString();
-        FakeHttpLayer fakeHttpLayer = Robolectric.getFakeHttpLayer();
-        fakeHttpLayer.addPendingHttpResponse(200, "");
-
-        assertThat(expectedUserAgent).isNotNull();
-
+    public void trackImpression_shouldAddToRequestQueue() throws Exception {
+        subject.onAdLoadSuccess(response);
         subject.trackImpression();
-        ThreadUtils.pause(NETWORK_DELAY); // does this make the test flaky?
 
-        HttpRequest request = fakeHttpLayer.getLastSentHttpRequestInfo().getHttpRequest();
-        assertThat(request.getFirstHeader("User-Agent").getValue()).isEqualTo(expectedUserAgent);
-        assertThat(request.getRequestLine().getUri()).isEqualTo("http://trackingUrl");
-
-        ClientConnectionManager connectionManager = httpClient.getConnectionManager();
-        try {
-            new MethodBuilder(connectionManager, "assertStillUp").setAccessible().execute();
-            fail("should have thrown an exception");
-        } catch (InvocationTargetException expected) {
-            assertThat(expected.getCause()).isInstanceOf(IllegalStateException.class);
-        }
+        verify(mockRequestQueue).add(argThat(isUrl("impressionUrl")));
     }
 
     @Test
-    public void trackImpression_shouldDoNothingIfImpressionUrlNotSpecified() throws Exception {
-        subject.configureUsingHttpResponse(response);
-        FakeHttpLayer fakeHttpLayer = Robolectric.getFakeHttpLayer();
-        fakeHttpLayer.addPendingHttpResponse(200, "");
-
+    public void trackImpression_noAdResponse_shouldNotAddToQueue() {
         subject.trackImpression();
-        Thread.sleep(300); // does this make the test flaky?
 
-        assertThat(fakeHttpLayer.getLastSentHttpRequestInfo()).isNull();
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Test
     public void registerClick_shouldHttpGetTheClickthroughUrl() throws Exception {
-        response.addHeader("X-Clickthrough", "http://clickUrl");
-        subject.configureUsingHttpResponse(response);
-        String expectedUserAgent = new WebView(context).getSettings().getUserAgentString();
-        FakeHttpLayer fakeHttpLayer = Robolectric.getFakeHttpLayer();
-        fakeHttpLayer.addPendingHttpResponse(200, "");
-
-        assertThat(expectedUserAgent).isNotNull();
+        subject.onAdLoadSuccess(response);
 
         subject.registerClick();
-        Thread.sleep(200); // does this make the test flaky?
-
-        HttpRequest request = fakeHttpLayer.getLastSentHttpRequestInfo().getHttpRequest();
-        assertThat(request.getFirstHeader("User-Agent").getValue()).isEqualTo(expectedUserAgent);
-        assertThat(request.getRequestLine().getUri()).isEqualTo("http://clickUrl");
-
-        ClientConnectionManager connectionManager = httpClient.getConnectionManager();
-        try {
-            new MethodBuilder(connectionManager, "assertStillUp").setAccessible().execute();
-            fail("should have thrown an exception");
-        } catch (InvocationTargetException expected) {
-            assertThat(expected.getCause()).isInstanceOf(IllegalStateException.class);
-        }
+        verify(mockRequestQueue).add(argThat(isUrl("clickUrl")));
     }
 
     @Test
-    public void trackImpression_shouldDoNothingIfClickthroughUrlNotSpecified() throws Exception {
-        subject.configureUsingHttpResponse(response);
-        FakeHttpLayer fakeHttpLayer = Robolectric.getFakeHttpLayer();
-        fakeHttpLayer.addPendingHttpResponse(200, "");
-
+    public void registerClick_NoAdResponse_shouldNotAddToQueue() {
         subject.registerClick();
-        Thread.sleep(50); // does this make the test flaky?
-
-        assertThat(fakeHttpLayer.getLastSentHttpRequestInfo()).isNull();
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Test
-    public void generateAdUrl_shouldIncludeMinFields() throws Exception {
-        String expectedAdUrl = "http://ads.mopub.com/m/ad" +
-                "?v=6" +
-                "&nv=" + MoPub.SDK_VERSION +
-                "&dn=" + Build.MANUFACTURER +
-                "%2C" + Build.MODEL +
-                "%2C" + Build.PRODUCT +
-                "&udid=sha%3A" +
-                "&z=-0700" +
-                "&o=u" +
-                "&sc_a=1.0" +
-                "&mr=1" +
-                "&ct=3" +
-                "&av=1.0" +
-                "&android_perms_ext_storage=0";
+    public void fetchAd_withNullMoPubView_shouldNotMakeRequest() throws Exception {
+        subject.cleanup();
+        subject.fetchAd("adUrl");
+        verify(mockRequestQueue, never()).add(any(AdRequest.class));
+    }
 
-        String adUrl = subject.generateAdUrl();
+    @Test
+    public void loadAd_shouldNotLoadWithoutConnectivity() throws Exception {
+        ConnectivityManager connectivityManager = (ConnectivityManager) RuntimeEnvironment.application.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Shadows.shadowOf(connectivityManager.getActiveNetworkInfo()).setConnectionStatus(false);
+        subject.setAdUnitId("adunit");
 
-        assertThat(adUrl).isEqualTo(expectedAdUrl);
+        subject.loadAd();
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Test
     public void loadAd_shouldNotLoadUrlIfAdUnitIdIsNull() throws Exception {
-        FakeHttpLayer fakeHttpLayer = Robolectric.getFakeHttpLayer();
-
         subject.loadAd();
 
-        assertThat(fakeHttpLayer.getLastSentHttpRequestInfo()).isNull();
-    }
-
-    @Test
-    public void loadAd_shouldScheduleRefreshIfNoNetworkConnectivity() throws Exception {
-        FakeHttpLayer fakeHttpLayer = Robolectric.getFakeHttpLayer();
-        Robolectric.pauseMainLooper();
-        ConnectivityManager connectivityManager = (ConnectivityManager) application.getSystemService(Context.CONNECTIVITY_SERVICE);
-        shadowOf(connectivityManager.getActiveNetworkInfo()).setConnectionStatus(false);
-        response.addHeader("X-Refreshtime", "30");
-        subject.configureUsingHttpResponse(response);
-        subject.setAdUnitId("adUnitId");
-
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
-
-        subject.loadAd();
-
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
-        assertThat(fakeHttpLayer.getLastSentHttpRequestInfo()).isNull();
-    }
-
-    @Test
-    public void loadAd_whenGooglePlayServicesIsLinkedAndAdInfoIsNotCached_shouldCacheAdInfoBeforeFetchingAd() throws Exception {
-        SharedPreferencesHelper.getSharedPreferences(context).edit().clear().commit();
-        GpsHelperTest.verifyCleanSharedPreferences(context);
-
-        GpsHelper.setClassNamesForTesting();
-        GpsHelperTest.TestAdInfo adInfo = new GpsHelperTest.TestAdInfo();
-
-        when(methodBuilder.setStatic(any(Class.class))).thenReturn(methodBuilder);
-        when(methodBuilder.addParam(any(Class.class), any())).thenReturn(methodBuilder);
-        when(methodBuilder.execute()).thenReturn(
-                GpsHelper.GOOGLE_PLAY_SUCCESS_CODE,
-                adInfo,
-                adInfo.ADVERTISING_ID,
-                adInfo.LIMIT_AD_TRACKING_ENABLED
-        );
-
-        final AdViewController.AdViewControllerGpsHelperListener mockAdViewControllerGpsHelperListener
-                = mock(AdViewController.AdViewControllerGpsHelperListener.class);
-        subject.setGpsHelperListener(mockAdViewControllerGpsHelperListener);
-        subject.setAdUnitId("adUnitId");
-        subject.setLocation(new Location(""));
-        subject.loadAd();
-        Thread.sleep(500);
-
-        verify(mockAdViewControllerGpsHelperListener).onFetchAdInfoCompleted();
-        GpsHelperTest.verifySharedPreferences(context, adInfo);
-    }
-
-    @Test
-    public void loadAd_whenGooglePlayServicesIsNotLinked_shouldFetchAdFast() throws Exception {
-        SharedPreferencesHelper.getSharedPreferences(context).edit().clear().commit();
-        GpsHelperTest.verifyCleanSharedPreferences(context);
-
-        GpsHelper.setClassNamesForTesting();
-        when(methodBuilder.setStatic(any(Class.class))).thenReturn(methodBuilder);
-        when(methodBuilder.addParam(any(Class.class), any())).thenReturn(methodBuilder);
-        // return error code so it fails
-        when(methodBuilder.execute()).thenReturn(GpsHelper.GOOGLE_PLAY_SUCCESS_CODE + 1);
-
-        final AdViewController.AdViewControllerGpsHelperListener mockAdViewControllerGpsHelperListener
-                = mock(AdViewController.AdViewControllerGpsHelperListener.class);
-        subject.setGpsHelperListener(mockAdViewControllerGpsHelperListener);
-        subject.setAdUnitId("adUnitId");
-        subject.setLocation(new Location(""));
-        subject.loadAd();
-        // no need to sleep since it run the callback without an async task
-
-        verify(mockAdViewControllerGpsHelperListener).onFetchAdInfoCompleted();
-        GpsHelperTest.verifyCleanSharedPreferences(context);
-    }
-
-    @Test
-    public void loadAd_whenGooglePlayServicesIsLinkedAndAdInfoIsCached_shouldFetchAdFast() throws Exception {
-        GpsHelperTest.TestAdInfo adInfo = new GpsHelperTest.TestAdInfo();
-        GpsHelperTest.populateAndVerifySharedPreferences(context, adInfo);
-        GpsHelper.setClassNamesForTesting();
-
-        when(methodBuilder.setStatic(any(Class.class))).thenReturn(methodBuilder);
-        when(methodBuilder.addParam(any(Class.class), any())).thenReturn(methodBuilder);
-        when(methodBuilder.execute()).thenReturn(
-                GpsHelper.GOOGLE_PLAY_SUCCESS_CODE
-        );
-
-        final AdViewController.AdViewControllerGpsHelperListener mockAdViewControllerGpsHelperListener
-                = mock(AdViewController.AdViewControllerGpsHelperListener.class);
-        subject.setGpsHelperListener(mockAdViewControllerGpsHelperListener);
-        subject.setAdUnitId("adUnitId");
-        subject.setLocation(new Location(""));
-        subject.loadAd();
-        // no need to sleep since it run the callback without an async task
-
-        verify(mockAdViewControllerGpsHelperListener).onFetchAdInfoCompleted();
-        GpsHelperTest.verifySharedPreferences(context, adInfo);
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Test
     public void loadNonJavascript_shouldFetchAd() throws Exception {
-        String url = "http://www.guy.com";
+        String url = "https://www.guy.com";
         subject.loadNonJavascript(url);
 
-        verify(adFetcher).fetchAdForUrl(eq(url));
+        verify(mockRequestQueue).add(argThat(isUrl(url)));
     }
 
     @Test
     public void loadNonJavascript_whenAlreadyLoading_shouldNotFetchAd() throws Exception {
-        String url = "http://www.guy.com";
+        String url = "https://www.guy.com";
         subject.loadNonJavascript(url);
-        reset(adFetcher);
+        reset(mockRequestQueue);
         subject.loadNonJavascript(url);
 
-        verify(adFetcher, never()).fetchAdForUrl(anyString());
-    }
-
-    @Test
-    public void loadNonJavascript_shouldClearTheFailUrl() throws Exception {
-        subject.setFailUrl("blarg:");
-        subject.loadNonJavascript("http://www.goodness.com");
-        reset(adFetcher);
-        subject.loadFailUrl(null);
-
-        verify(adFetcher, never()).fetchAdForUrl(anyString());
-        verify(moPubView).adFailed(eq(NO_FILL));
+        verify(mockRequestQueue, never()).add(any(Request.class));
     }
 
     @Test
@@ -488,23 +366,22 @@ public class AdViewControllerTest {
 
     @Test
     public void reload_shouldReuseOldUrl() throws Exception {
-        String url = "http://www.guy.com";
+        String url = "https://www.guy.com";
         subject.loadNonJavascript(url);
         subject.setNotLoading();
-        reset(adFetcher);
+        reset(mockRequestQueue);
         subject.reload();
 
-        verify(adFetcher).fetchAdForUrl(eq(url));
+        verify(mockRequestQueue).add(argThat(isUrl(url)));
     }
 
     @Test
     public void loadFailUrl_shouldLoadFailUrl() throws Exception {
-        String failUrl = "http://www.bad.man";
-        subject.setFailUrl(failUrl);
-        subject.loadFailUrl(INTERNAL_ERROR);
+        subject.onAdLoadSuccess(response);
+        subject.loadFailUrl(MoPubErrorCode.INTERNAL_ERROR);
 
-        verify(adFetcher).fetchAdForUrl(eq(failUrl));
-        verify(moPubView, never()).adFailed(any(MoPubErrorCode.class));
+        verify(mockRequestQueue).add(argThat(isUrl("failUrl")));
+        verify(mockMoPubView, never()).adFailed(any(MoPubErrorCode.class));
     }
 
     @Test
@@ -515,20 +392,18 @@ public class AdViewControllerTest {
 
     @Test
     public void loadFailUrl_whenFailUrlIsNull_shouldCallAdDidFail() throws Exception {
-        subject.setFailUrl(null);
-        subject.loadFailUrl(INTERNAL_ERROR);
+        response.toBuilder().setFailoverUrl(null).build();
+        subject.loadFailUrl(MoPubErrorCode.INTERNAL_ERROR);
 
-        verify(moPubView).adFailed(eq(NO_FILL));
-        verify(adFetcher, never()).fetchAdForUrl(anyString());
+        verify(mockMoPubView).adFailed(eq(MoPubErrorCode.NO_FILL));
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Test
     public void setAdContentView_whenCalledFromWrongUiThread_shouldStillSetContentView() throws Exception {
-        response.addHeader("X-Width", "320");
-        response.addHeader("X-Height", "50");
         final View view = mock(View.class);
         AdViewController.setShouldHonorServerDimensions(view);
-        subject.configureUsingHttpResponse(response);
+        subject.onAdLoadSuccess(response);
 
         new Thread(new Runnable() {
             @Override
@@ -536,12 +411,12 @@ public class AdViewControllerTest {
                 subject.setAdContentView(view);
             }
         }).start();
-        ThreadUtils.pause(10);
-        Robolectric.runUiThreadTasks();
+        ThreadUtils.pause(100);
+        ShadowLooper.runUiThreadTasks();
 
-        verify(moPubView).removeAllViews();
+        verify(mockMoPubView).removeAllViews();
         ArgumentCaptor<FrameLayout.LayoutParams> layoutParamsCaptor = ArgumentCaptor.forClass(FrameLayout.LayoutParams.class);
-        verify(moPubView).addView(eq(view), layoutParamsCaptor.capture());
+        verify(mockMoPubView).addView(eq(view), layoutParamsCaptor.capture());
         FrameLayout.LayoutParams layoutParams = layoutParamsCaptor.getValue();
 
         assertThat(layoutParams.width).isEqualTo(320);
@@ -551,11 +426,9 @@ public class AdViewControllerTest {
 
     @Test
     public void setAdContentView_whenCalledAfterCleanUp_shouldNotRemoveViewsAndAddView() throws Exception {
-        response.addHeader("X-Width", "320");
-        response.addHeader("X-Height", "50");
         final View view = mock(View.class);
         AdViewController.setShouldHonorServerDimensions(view);
-        subject.configureUsingHttpResponse(response);
+        subject.onAdLoadSuccess(response);
 
         subject.cleanup();
         new Thread(new Runnable() {
@@ -565,25 +438,23 @@ public class AdViewControllerTest {
             }
         }).start();
         ThreadUtils.pause(10);
-        Robolectric.runUiThreadTasks();
+        ShadowLooper.runUiThreadTasks();
 
-        verify(moPubView, never()).removeAllViews();
-        verify(moPubView, never()).addView(any(View.class), any(FrameLayout.LayoutParams.class));
+        verify(mockMoPubView, never()).removeAllViews();
+        verify(mockMoPubView, never()).addView(any(View.class), any(FrameLayout.LayoutParams.class));
     }
 
     @Test
     public void setAdContentView_whenHonorServerDimensionsAndHasDimensions_shouldSizeAndCenterView() throws Exception {
-        response.addHeader("X-Width", "320");
-        response.addHeader("X-Height", "50");
         View view = mock(View.class);
         AdViewController.setShouldHonorServerDimensions(view);
-        subject.configureUsingHttpResponse(response);
+        subject.onAdLoadSuccess(response);
 
         subject.setAdContentView(view);
 
-        verify(moPubView).removeAllViews();
+        verify(mockMoPubView).removeAllViews();
         ArgumentCaptor<FrameLayout.LayoutParams> layoutParamsCaptor = ArgumentCaptor.forClass(FrameLayout.LayoutParams.class);
-        verify(moPubView).addView(eq(view), layoutParamsCaptor.capture());
+        verify(mockMoPubView).addView(eq(view), layoutParamsCaptor.capture());
         FrameLayout.LayoutParams layoutParams = layoutParamsCaptor.getValue();
 
         assertThat(layoutParams.width).isEqualTo(320);
@@ -593,15 +464,16 @@ public class AdViewControllerTest {
 
     @Test
     public void setAdContentView_whenHonorServerDimensionsAndDoesntHaveDimensions_shouldWrapAndCenterView() throws Exception {
+        response = response.toBuilder().setDimensions(null, null).build();
         View view = mock(View.class);
         AdViewController.setShouldHonorServerDimensions(view);
-        subject.configureUsingHttpResponse(response);
+        subject.onAdLoadSuccess(response);
 
         subject.setAdContentView(view);
 
-        verify(moPubView).removeAllViews();
+        verify(mockMoPubView).removeAllViews();
         ArgumentCaptor<FrameLayout.LayoutParams> layoutParamsCaptor = ArgumentCaptor.forClass(FrameLayout.LayoutParams.class);
-        verify(moPubView).addView(eq(view), layoutParamsCaptor.capture());
+        verify(mockMoPubView).addView(eq(view), layoutParamsCaptor.capture());
         FrameLayout.LayoutParams layoutParams = layoutParamsCaptor.getValue();
 
         assertThat(layoutParams.width).isEqualTo(FrameLayout.LayoutParams.WRAP_CONTENT);
@@ -611,20 +483,198 @@ public class AdViewControllerTest {
 
     @Test
     public void setAdContentView_whenNotServerDimensions_shouldWrapAndCenterView() throws Exception {
-        response.addHeader("X-Width", "320");
-        response.addHeader("X-Height", "50");
-        subject.configureUsingHttpResponse(response);
+        subject.onAdLoadSuccess(response);
         View view = mock(View.class);
 
         subject.setAdContentView(view);
 
-        verify(moPubView).removeAllViews();
+        verify(mockMoPubView).removeAllViews();
         ArgumentCaptor<FrameLayout.LayoutParams> layoutParamsCaptor = ArgumentCaptor.forClass(FrameLayout.LayoutParams.class);
-        verify(moPubView).addView(eq(view), layoutParamsCaptor.capture());
+        verify(mockMoPubView).addView(eq(view), layoutParamsCaptor.capture());
         FrameLayout.LayoutParams layoutParams = layoutParamsCaptor.getValue();
 
         assertThat(layoutParams.width).isEqualTo(FrameLayout.LayoutParams.WRAP_CONTENT);
         assertThat(layoutParams.height).isEqualTo(FrameLayout.LayoutParams.WRAP_CONTENT);
         assertThat(layoutParams.gravity).isEqualTo(Gravity.CENTER);
+    }
+
+    @Test
+    public void onAdLoadSuccess_withResponseContainingRefreshTime_shouldSetNewRefreshTime() {
+        assertThat(subject.getRefreshTimeMillis()).isEqualTo(60000);
+
+        response = response.toBuilder().setRefreshTimeMilliseconds(100000).build();
+        subject.onAdLoadSuccess(response);
+
+        assertThat(subject.getRefreshTimeMillis()).isEqualTo(100000);
+    }
+
+    @Test
+    public void onAdLoadSuccess_withResponseNotContainingRefreshTime_shoulSetRefreshTimeToNull() {
+        response = response.toBuilder().setRefreshTimeMilliseconds(null).build();
+        subject.onAdLoadSuccess(response);
+
+        assertThat(subject.getRefreshTimeMillis()).isNull();
+    }
+
+    @Test
+    public void onAdLoadError_withMoPubNetworkErrorIncludingRefreshTime_shouldSetNewRefreshTime() {
+        subject.setRefreshTimeMillis(54321);
+
+        subject.onAdLoadError(
+                new MoPubNetworkError(
+                        "network error with specified refresh time",
+                        MoPubNetworkError.Reason.NO_FILL,
+                        1000)
+        );
+
+        assertThat(subject.getRefreshTimeMillis()).isEqualTo(1000);
+    }
+
+    @Test
+    public void onAdLoadError_withMoPubNetworkErrorNotIncludingRefreshTime_shouldNotModifyRefreshTime() {
+        subject.setRefreshTimeMillis(12345);
+
+        subject.onAdLoadError(
+                new MoPubNetworkError(
+                        "network error that does not specify refresh time",
+                        MoPubNetworkError.Reason.UNSPECIFIED)
+        );
+
+        assertThat(subject.getRefreshTimeMillis()).isEqualTo(12345);
+    }
+
+    @Test
+    public void onAdLoadError_withVolleyErrorThatIsNotAnInstanceOfMoPubNetworkError_shouldNotModifyRefreshTime() {
+        subject.onAdLoadError(new VolleyError("message"));
+
+        assertThat(subject.getRefreshTimeMillis()).isEqualTo(60000);
+    }
+
+    @Test
+    public void onAdLoadError_withErrorReasonWarmingUp_shouldReturnErrorCodeWarmup_shouldCallMoPubViewAdFailed() {
+        final VolleyError expectedInternalError = new MoPubNetworkError(
+                MoPubNetworkError.Reason.WARMING_UP);
+
+        subject.onAdLoadError(expectedInternalError);
+
+        verify(mockMoPubView).adFailed(MoPubErrorCode.WARMUP);
+    }
+
+    @Test
+    public void onAdLoadError_whenNoNetworkConnection_shouldReturnErrorCodeNoConnection_shouldCallMoPubViewAdFailed() {
+        subject.onAdLoadError(new NoConnectionError());
+
+        // DeviceUtils#isNetworkAvailable conveniently returns false due to
+        // not having the network permission.
+        verify(mockMoPubView).adFailed(MoPubErrorCode.NO_CONNECTION);
+    }
+
+    @Test
+    public void onAdLoadError_withInvalidServerResponse_shouldReturnErrorCodeServerError_shouldCallMoPubViewAdFailed_shouldIncrementBackoffPower() {
+        for (int htmlErrorCode : HTML_ERROR_CODES) {
+            final int oldBackoffPower = subject.mBackoffPower;
+            final NetworkResponse errorNetworkResponse = new NetworkResponse(htmlErrorCode, null,
+                    null, true, 0);
+            final VolleyError volleyError = new VolleyError(errorNetworkResponse);
+
+            subject.onAdLoadError(volleyError);
+
+            assertThat(subject.mBackoffPower).isEqualTo(oldBackoffPower + 1);
+        }
+        verify(mockMoPubView, times(HTML_ERROR_CODES.length)).adFailed(MoPubErrorCode.SERVER_ERROR);
+    }
+
+    @Test
+    public void loadCustomEvent_shouldCallMoPubViewLoadCustomEvent() throws Exception {
+        Map serverExtras = mock(Map.class);
+        String customEventClassName = "customEventClassName";
+        subject.loadCustomEvent(mockMoPubView, customEventClassName, serverExtras);
+
+        verify(mockMoPubView).loadCustomEvent(customEventClassName, serverExtras);
+    }
+
+    @Test
+    public void loadCustomEvent_withNullMoPubView_shouldNotCallMoPubViewLoadCustomEvent() throws Exception {
+        Map serverExtras = mock(Map.class);
+        String customEventClassName = "customEventClassName";
+        subject.loadCustomEvent(null, customEventClassName, serverExtras);
+
+        verify(mockMoPubView, never()).loadCustomEvent(anyString(), anyMap());
+    }
+
+    @Test
+    public void loadCustomEvent_withNullCustomEventClassName_shouldCallMoPubViewLoadCustomEvent() throws Exception {
+        Map serverExtras = mock(Map.class);
+        subject.loadCustomEvent(mockMoPubView, null, serverExtras);
+
+        verify(mockMoPubView).loadCustomEvent(null, serverExtras);
+    }
+
+    @Test
+    public void getErrorCodeFromVolleyError_whenNoConnection_shouldReturnErrorCodeNoConnection() {
+        final VolleyError noConnectionError = new NoConnectionError();
+
+        // DeviceUtils#isNetworkAvailable conveniently returns false due to
+        // not having the internet permission.
+        final MoPubErrorCode errorCode = AdViewController.getErrorCodeFromVolleyError(
+                noConnectionError, activity);
+
+        assertThat(errorCode).isEqualTo(MoPubErrorCode.NO_CONNECTION);
+    }
+
+    @Test
+    public void getErrorCodeFromVolleyError_withNullResponse_whenConnectionValid_shouldReturnErrorCodeUnspecified() {
+        final VolleyError noConnectionError = new NoConnectionError();
+
+        Shadows.shadowOf(activity).grantPermissions(Manifest.permission.INTERNET);
+        final MoPubErrorCode errorCode = AdViewController.getErrorCodeFromVolleyError(
+                noConnectionError, activity);
+
+        assertThat(errorCode).isEqualTo(MoPubErrorCode.UNSPECIFIED);
+    }
+
+    @Test
+    public void getErrorCodeFromVolleyError_withInvalidServerResponse_shouldReturnErrorCodeServerError() {
+        for (int htmlErrorCode : HTML_ERROR_CODES) {
+            final NetworkResponse errorNetworkResponse = new NetworkResponse(htmlErrorCode, null,
+                    null, true, 0);
+            final VolleyError volleyError = new VolleyError(errorNetworkResponse);
+
+            final MoPubErrorCode errorCode = AdViewController.getErrorCodeFromVolleyError(
+                    volleyError, activity);
+
+            assertThat(errorCode).isEqualTo(MoPubErrorCode.SERVER_ERROR);
+        }
+    }
+
+    @Test
+    public void getErrorCodeFromVolleyError_withErrorReasonWarmingUp_shouldReturnErrorCodeWarmingUp() {
+        final VolleyError networkError = new MoPubNetworkError(MoPubNetworkError.Reason.WARMING_UP);
+
+        final MoPubErrorCode errorCode = AdViewController.getErrorCodeFromVolleyError(
+                networkError, activity);
+
+        assertThat(errorCode).isEqualTo(MoPubErrorCode.WARMUP);
+    }
+
+    @Test
+    public void getErrorCodeFromVolleyError_withErrorReasonNoFill_shouldReturnErrorCodeNoFill() {
+        final VolleyError networkError = new MoPubNetworkError(MoPubNetworkError.Reason.NO_FILL);
+
+        final MoPubErrorCode errorCode = AdViewController.getErrorCodeFromVolleyError(
+                networkError, activity);
+
+        assertThat(errorCode).isEqualTo(MoPubErrorCode.NO_FILL);
+    }
+
+    @Test
+    public void getErrorCodeFromVolleyError_withErrorReasonBadHeaderData_shouldReturnErrorCodeUnspecified() {
+        final VolleyError networkError = new MoPubNetworkError(
+                MoPubNetworkError.Reason.BAD_HEADER_DATA);
+
+        final MoPubErrorCode errorCode = AdViewController.getErrorCodeFromVolleyError(
+                networkError, activity);
+
+        assertThat(errorCode).isEqualTo(MoPubErrorCode.UNSPECIFIED);
     }
 }

@@ -17,22 +17,26 @@
 
     <repositories>
         <repository>
+            <id>jcenter</id>
+            <name>JCenter</name>
+            <url>http://jcenter.bintray.com</url>
+        </repository>
+
+        <repository>
             <id>andsupport</id>
             <name>Android Support</name>
-            <url>file://${env.ANDROID_HOME}/extras/android/m2repository</url>
+            <url>file:///${env.ANDROID_HOME}/extras/android/m2repository</url>
         </repository>
 
         <repository>
             <id>playservices</id>
             <name>Android Play Services</name>
-            <url>file://${env.ANDROID_HOME}/extras/google/m2repository</url>
+            <url>file:///${env.ANDROID_HOME}/extras/google/m2repository</url>
         </repository>
     </repositories>
 
     <modules>
         <module>mopub-sdk</module>
         <module>mopub-sample</module>
-        <module>robotium-sample</module>
-        <module>robotium-tests</module>
     </modules>
 </project>

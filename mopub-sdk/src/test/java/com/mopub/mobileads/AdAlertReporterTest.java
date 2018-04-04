@@ -1,67 +1,48 @@
-/*
- * Copyright (c) 2010-2013, MoPub Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *  Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- *
- *  Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the distribution.
- *
- *  Neither the name of 'MoPub Inc.' nor the names of its contributors
- *   may be used to endorse or promote products derived from this software
- *   without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 package com.mopub.mobileads;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.view.View;
 import android.widget.TextView;
-import com.mopub.mobileads.test.support.SdkTestRunner;
+
+import com.mopub.common.AdReport;
+import com.mopub.common.test.support.SdkTestRunner;
 import com.mopub.common.util.test.support.TestDateAndTime;
+
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.Robolectric;
+import org.mockito.Mock;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowApplication;
 
-import java.io.*;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Locale;
 
 import static org.fest.assertions.api.Assertions.assertThat;
-import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.stub;
+import static org.mockito.Mockito.verify;
 
 @RunWith(SdkTestRunner.class)
+@Config(constants = BuildConfig.class)
 public class AdAlertReporterTest {
     private final static String EMAIL_ADDRESS = "creative-review@mopub.com";
     private AdAlertReporter subject;
-    private Context context;
-    private View view;
-    private AdConfiguration adConfiguration;
+    @Mock
+    private AdReport mockAdReport;
+    @Mock
+    private Context mockContext;
+    @Mock
+    private View mockView;
     private Intent emailIntent;
     private Bitmap bitmap;
     private ArrayList<Uri> emailAttachments;
@@ -69,15 +50,10 @@ public class AdAlertReporterTest {
 
     @Before
     public void setup() {
-        context = mock(Context.class);
-
         bitmap = Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888);
 
-        view = mock(View.class);
-        stub(view.getRootView()).toReturn(view);
-        stub(view.getDrawingCache()).toReturn(bitmap);
-
-        adConfiguration = mock(AdConfiguration.class);
+        stub(mockView.getRootView()).toReturn(mockView);
+        stub(mockView.getDrawingCache()).toReturn(bitmap);
 
         now = new Date();
         TestDateAndTime.getInstance().setNow(now);
@@ -85,18 +61,16 @@ public class AdAlertReporterTest {
 
     @Test
     public void constructor_shouldCreateSendToIntentWithEmailAddress() throws Exception {
-        subject = new AdAlertReporter(context, view, adConfiguration);
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
         emailIntent = subject.getEmailIntent();
 
-        assertThat(emailIntent.getAction()).isEqualTo(Intent.ACTION_SEND_MULTIPLE);
-        assertThat(emailIntent.getType()).isEqualTo("plain/text");
-        assertThat(emailIntent.getDataString()).isEqualTo("mailto:");
-        assertThat(emailIntent.getStringArrayExtra(Intent.EXTRA_EMAIL)[0]).isEqualTo(EMAIL_ADDRESS);
+        assertThat(emailIntent.getAction()).isEqualTo(Intent.ACTION_SENDTO);
+        assertThat(emailIntent.getData()).isEqualTo(Uri.parse("mailto:creative-review@mopub.com"));
     }
 
     @Test
     public void constructor_shouldCreateIntentWithDatestampInSubject() throws Exception {
-        subject = new AdAlertReporter(context, view, adConfiguration);
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
         emailIntent = subject.getEmailIntent();
 
         String emailSubject = emailIntent.getStringExtra(Intent.EXTRA_SUBJECT);
@@ -106,7 +80,7 @@ public class AdAlertReporterTest {
         assertThat(title).isEqualTo("New creative violation report");
 
         String dateTimeString = subjectParts[1];
-        SimpleDateFormat dateFormat = new SimpleDateFormat("M/d/yy hh:mm:ss a z");
+        SimpleDateFormat dateFormat = new SimpleDateFormat("M/d/yy hh:mm:ss a z", Locale.US);
 
         Date date = dateFormat.parse(dateTimeString);
 
@@ -118,23 +92,11 @@ public class AdAlertReporterTest {
         TextView textView = mock(TextView.class);
         Bitmap sampleBitmap = Bitmap.createBitmap(10, 10, Bitmap.Config.ALPHA_8);
         stub(textView.getDrawingCache()).toReturn(sampleBitmap);
-        stub(view.getRootView()).toReturn(textView);
+        stub(mockView.getRootView()).toReturn(textView);
 
-        stub(adConfiguration.getResponseString()).toReturn("<html>a valid response</html>");
-        stub(adConfiguration.getDspCreativeId()).toReturn("");
-        stub(adConfiguration.getPlatformVersion()).toReturn(1);
-        stub(adConfiguration.getDeviceModel()).toReturn("android");
-        stub(adConfiguration.getAdUnitId()).toReturn("abc");
-        stub(adConfiguration.getDeviceLocale()).toReturn("US");
-        stub(adConfiguration.getHashedUdid()).toReturn("UDID");
-        stub(adConfiguration.getNetworkType()).toReturn("unknown");
-        stub(adConfiguration.getPlatform()).toReturn("android");
-        stub(adConfiguration.getTimeStamp()).toReturn(now.getTime());
-        stub(adConfiguration.getAdType()).toReturn("interstitial");
-        stub(adConfiguration.getWidth()).toReturn(480);
-        stub(adConfiguration.getHeight()).toReturn(320);
-
-        subject = new AdAlertReporter(context, view, adConfiguration);
+        stub(mockAdReport.toString()).toReturn("Ad Report data - this is a long list of newlined params.");
+        stub(mockAdReport.getResponseString()).toReturn("Test ad string.");
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
 
         emailIntent = subject.getEmailIntent();
         String emailSubject = emailIntent.getStringExtra(Intent.EXTRA_TEXT);
@@ -151,212 +113,82 @@ public class AdAlertReporterTest {
     }
 
     @Test
-    public void constructor_shouldAddBitmapToAttachmentArray() throws Exception {
-        stub(context.getFilesDir()).toReturn(new File("filesDir"));
-        stub(context.openFileOutput(any(String.class), any(int.class))).toReturn(mock(FileOutputStream.class));
-        subject = new AdAlertReporter(context, view, adConfiguration);
-
-        emailAttachments = subject.getEmailAttachments();
-        Uri fileUri = Uri.fromFile(new File("filesDir/mp_adalert_screenshot.png"));
-
-        assertThat(emailAttachments).contains(fileUri);
-    }
-
-    @Test
-    public void constructor_shouldAddParametersTextFileToAttachmentArray() throws Exception {
-        stub(context.getFilesDir()).toReturn(new File("filesDir"));
-        stub(context.openFileOutput(any(String.class), any(int.class))).toReturn(mock(FileOutputStream.class));
-        subject = new AdAlertReporter(context, view, adConfiguration);
-
-        emailAttachments = subject.getEmailAttachments();
-        Uri fileUri = Uri.fromFile(new File("filesDir/mp_adalert_parameters.txt"));
-
-        assertThat(emailAttachments).contains(fileUri);
-    }
-
-    @Test
-    public void constructor_shouldProperlyConstructParametersTextFile() throws Exception {
-        String expectedParameters =
-                "sdk_version : 1.15.2.2\n" +
-                "creative_id : \n" +
-                "platform_version : 1\n" +
-                "device_model : android\n" +
-                "ad_unit_id : abc\n" +
-                "device_locale : US\n" +
-                "device_id : UDID\n" +
-                "network_type : unknown\n" +
-                "platform : android\n" +
-                "timestamp : " + getCurrentDateTime() + "\n" +
-                "ad_type : interstitial\n" +
-                "ad_size : {480, 320}\n";
-
-        stub(adConfiguration.getSdkVersion()).toReturn("1.15.2.2");
-        stub(adConfiguration.getDspCreativeId()).toReturn("");
-        stub(adConfiguration.getPlatformVersion()).toReturn(1);
-        stub(adConfiguration.getDeviceModel()).toReturn("android");
-        stub(adConfiguration.getAdUnitId()).toReturn("abc");
-        stub(adConfiguration.getDeviceLocale()).toReturn("US");
-        stub(adConfiguration.getHashedUdid()).toReturn("UDID");
-        stub(adConfiguration.getNetworkType()).toReturn("unknown");
-        stub(adConfiguration.getPlatform()).toReturn("android");
-        stub(adConfiguration.getTimeStamp()).toReturn(now.getTime());
-        stub(adConfiguration.getAdType()).toReturn("interstitial");
-        stub(adConfiguration.getWidth()).toReturn(480);
-        stub(adConfiguration.getHeight()).toReturn(320);
-
-        subject = new AdAlertReporter(context, view, adConfiguration);
-
-        assertThat(subject.getParameters()).isEqualTo(expectedParameters);
-    }
-
-    @Test
-    public void constructor_withInvalidAdConfigurationValues_shouldReturnSomethingSensible() throws Exception {
-        String expectedParameters =
-                "sdk_version : null\n" +
-                "creative_id : null\n" +
-                "platform_version : -1\n" +
-                "device_model : null\n" +
-                "ad_unit_id : null\n" +
-                "device_locale : null\n" +
-                "device_id : null\n" +
-                "network_type : null\n" +
-                "platform : null\n" +
-                "timestamp : null" + "\n" +
-                "ad_type : null\n" +
-                "ad_size : {-1, -1}\n";
-
-        stub(adConfiguration.getSdkVersion()).toReturn(null);
-        stub(adConfiguration.getDspCreativeId()).toReturn(null);
-        stub(adConfiguration.getPlatformVersion()).toReturn(-1);
-        stub(adConfiguration.getDeviceModel()).toReturn(null);
-        stub(adConfiguration.getAdUnitId()).toReturn(null);
-        stub(adConfiguration.getDeviceLocale()).toReturn(null);
-        stub(adConfiguration.getHashedUdid()).toReturn(null);
-        stub(adConfiguration.getNetworkType()).toReturn(null);
-        stub(adConfiguration.getPlatform()).toReturn(null);
-        stub(adConfiguration.getTimeStamp()).toReturn(-1l);
-        stub(adConfiguration.getAdType()).toReturn(null);
-        stub(adConfiguration.getWidth()).toReturn(-1);
-        stub(adConfiguration.getHeight()).toReturn(-1);
-
-        subject = new AdAlertReporter(context, view, adConfiguration);
-
-        assertThat(subject.getParameters()).isEqualTo(expectedParameters);
-    }
-
-    @Test
-    public void constructor_whenAdConfigurationIsNull_shouldReturnEmptyString() throws Exception {
-        subject = new AdAlertReporter(context, view, null);
+    public void constructor_whenAdReportIsNull_shouldReturnEmptyString() throws Exception {
+        subject = new AdAlertReporter(mockContext, mockView, null);
 
         assertThat(subject.getParameters()).isEmpty();
         assertThat(subject.getResponse()).isEmpty();
     }
 
     @Test
-    public void constructor_shouldReturnCorrectResponseString() throws Exception {
+    public void constructor_shouldSetCorrectResponseString() throws Exception {
         String expectedResponse = "response";
 
-        stub(adConfiguration.getResponseString()).toReturn(expectedResponse);
-        subject = new AdAlertReporter(context, view, adConfiguration);
+        stub(mockAdReport.getResponseString()).toReturn(expectedResponse);
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
 
         assertThat(subject.getResponse()).isEqualTo(expectedResponse);
     }
 
     @Test
-    public void constructor_shouldAddMarkupTextFileToAttachmentArray() throws Exception {
-        stub(adConfiguration.getResponseString()).toReturn(" ");
-
-        stub(context.getFilesDir()).toReturn(new File("filesDir"));
-        stub(context.openFileOutput(any(String.class), any(int.class))).toReturn(mock(FileOutputStream.class));
-        subject = new AdAlertReporter(context, view, adConfiguration);
-
-        emailAttachments = subject.getEmailAttachments();
-        Uri fileUri = Uri.fromFile(new File("filesDir/mp_adalert_markup.html"));
-
-        assertThat(emailAttachments).contains(fileUri);
-    }
-
-    @Test
-    public void send_shouldAddAttachmentsToIntent() throws Exception {
-        stub(adConfiguration.getResponseString()).toReturn("response!");
-        stub(context.getFilesDir()).toReturn(new File("filesDir"));
-        stub(context.openFileOutput(any(String.class), any(int.class))).toReturn(mock(FileOutputStream.class));
-
-        subject = new AdAlertReporter(context, view, adConfiguration);
-        subject.send();
-
-        emailIntent = subject.getEmailIntent();
-        ArrayList<Uri> attachments = emailIntent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-
-        assertThat(attachments.size()).isEqualTo(3);
-        assertThat(attachments).contains(Uri.fromFile(new File("filesDir/mp_adalert_screenshot.png")));
-        assertThat(attachments).contains(Uri.fromFile(new File("filesDir/mp_adalert_parameters.txt")));
-        assertThat(attachments).contains(Uri.fromFile(new File("filesDir/mp_adalert_markup.html")));
-    }
-
-    @Test
     public void send_shouldCreateEmailChooserIntent() throws Exception {
-        stub(adConfiguration.getResponseString()).toReturn("response!");
-
-        subject = new AdAlertReporter(new Activity(), view, adConfiguration);
+        final Context applicationContext = RuntimeEnvironment.application;
+        // A real device uses application context here, which causes Intents.startActivity to add
+        // FLAG_ACTIVITY_NEW_TASK (and thus we assert for it below)
+        subject = new AdAlertReporter(applicationContext, mockView, mockAdReport);
         subject.send();
 
-        Intent intent = Robolectric.getShadowApplication().getNextStartedActivity();
-        assertThat(intent.getAction()).isEqualTo(Intent.ACTION_CHOOSER);
-        assertThat(intent.getStringExtra(Intent.EXTRA_TITLE)).isEqualTo("Send Email...");
+        Intent intent = ShadowApplication.getInstance().getNextStartedActivity();
+        assertThat(intent.getAction()).isEqualTo(Intent.ACTION_SENDTO);
         assertThat(intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK).isNotEqualTo(0);
     }
 
+    @Ignore("pending")
     @Test
     public void getScreenshot_whenIsDrawingCacheEnabled_shouldKeepDrawingCacheEnabled() throws Exception {
-//        reset(view);
-//        stub(view.getRootView()).toReturn(view);
-//        stub(view.isDrawingCacheEnabled()).toReturn(true);
-//
-//        subject = new AdAlertReporter(context, view, adConfiguration);
-//
-//        verify(view, never()).setDrawingCacheEnabled(false);
+        reset(mockView);
+        stub(mockView.getRootView()).toReturn(mockView);
+        stub(mockView.isDrawingCacheEnabled()).toReturn(true);
+
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
+
+        verify(mockView, never()).setDrawingCacheEnabled(false);
     }
 
+    @Ignore("pending")
     @Test
     public void getScreenshot_whenIsDrawingCacheDisabled_shouldKeepDrawingCacheDisabled() throws Exception {
-//        reset(view);
-//        stub(view.getRootView()).toReturn(view);
-//        stub(view.isDrawingCacheEnabled()).toReturn(false);
-//
-//        subject = new AdAlertReporter(context, view, adConfiguration);
-//
-//        verify(view).setDrawingCacheEnabled(false);
+        reset(mockView);
+        stub(mockView.getRootView()).toReturn(mockView);
+        stub(mockView.isDrawingCacheEnabled()).toReturn(false);
+
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
+
+        verify(mockView).setDrawingCacheEnabled(false);
     }
 
     @Test
     public void getScreenshot_whenViewIsNull_shouldPass() throws Exception {
-        subject = new AdAlertReporter(context, null, adConfiguration);
+        subject = new AdAlertReporter(mockContext, null, mockAdReport);
 
         // pass
     }
 
     @Test
     public void getScreenshot_whenRootViewIsNull_shouldPass() throws Exception {
-        stub(view.getRootView()).toReturn(null);
+        stub(mockView.getRootView()).toReturn(null);
 
-        subject = new AdAlertReporter(context, view, adConfiguration);
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
 
         // pass
     }
 
     @Test
     public void getScreenshot_whenRootViewDrawingCacheIsNull_shouldPass() throws Exception {
-        stub(view.getDrawingCache()).toReturn(null);
+        stub(mockView.getDrawingCache()).toReturn(null);
 
-        subject = new AdAlertReporter(context, view, adConfiguration);
+        subject = new AdAlertReporter(mockContext, mockView, mockAdReport);
 
         // pass
     }
-
-    private String getCurrentDateTime() {
-        SimpleDateFormat dateFormat = new SimpleDateFormat("M/d/yy hh:mm:ss a z");
-        return dateFormat.format(now);
-    }
 }
-

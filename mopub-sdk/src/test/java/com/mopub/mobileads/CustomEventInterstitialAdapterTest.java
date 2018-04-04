@@ -1,52 +1,30 @@
-/*
- * Copyright (c) 2010-2013, MoPub Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *  Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- *
- *  Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the distribution.
- *
- *  Neither the name of 'MoPub Inc.' nor the names of its contributors
- *   may be used to endorse or promote products derived from this software
- *   without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 package com.mopub.mobileads;
 
 import android.content.Context;
 import android.location.Location;
+
+import com.mopub.common.AdReport;
+import com.mopub.common.DataKeys;
+import com.mopub.common.test.support.SdkTestRunner;
 import com.mopub.mobileads.factories.CustomEventInterstitialFactory;
-import com.mopub.mobileads.test.support.SdkTestRunner;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.robolectric.Robolectric;
+import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowLooper;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static com.mopub.mobileads.CustomEventInterstitial.CustomEventInterstitialListener;
 import static com.mopub.mobileads.MoPubErrorCode.ADAPTER_CONFIGURATION_ERROR;
+import static com.mopub.mobileads.MoPubErrorCode.ADAPTER_NOT_FOUND;
 import static com.mopub.mobileads.MoPubErrorCode.NETWORK_TIMEOUT;
 import static com.mopub.mobileads.MoPubErrorCode.UNSPECIFIED;
 import static org.fest.assertions.api.Assertions.assertThat;
@@ -58,30 +36,38 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.stub;
 import static org.mockito.Mockito.verify;
 
-
 @RunWith(SdkTestRunner.class)
+@Config(constants = BuildConfig.class)
 public class CustomEventInterstitialAdapterTest {
+    private static long BROADCAST_IDENTIFER = 123;
     private CustomEventInterstitialAdapter subject;
-    private MoPubInterstitial moPubInterstitial;
+    @Mock
+    private MoPubInterstitial mockMoPubInterstitial;
     private CustomEventInterstitial interstitial;
     private Map<String, Object> expectedLocalExtras;
     private HashMap<String, String> expectedServerExtras;
-    private AdViewController adViewController;
+    @Mock
+    private AdViewController mockAdViewController;
+    @Mock
+    private AdReport mockAdReport;
     private MoPubInterstitial.MoPubInterstitialView moPubInterstitialView;
     private static final String CLASS_NAME = "arbitrary_interstitial_adapter_class_name";
-    private static final String JSON_PARAMS = "{\"key\":\"value\",\"a different key\":\"a different value\"}";
+    private Map<String, String> serverExtras;
     private CustomEventInterstitialAdapter.CustomEventInterstitialAdapterListener interstitialAdapterListener;
 
     @Before
     public void setUp() throws Exception {
-        moPubInterstitial = mock(MoPubInterstitial.class);
-        stub(moPubInterstitial.getAdTimeoutDelay()).toReturn(null);
-        moPubInterstitialView = mock(MoPubInterstitial.MoPubInterstitialView.class);
-        adViewController = mock(AdViewController.class);
-        stub(moPubInterstitialView.getAdViewController()).toReturn(adViewController);
-        stub(moPubInterstitial.getMoPubInterstitialView()).toReturn(moPubInterstitialView);
 
-        subject = new CustomEventInterstitialAdapter(moPubInterstitial, CLASS_NAME, JSON_PARAMS);
+        stub(mockMoPubInterstitial.getAdTimeoutDelay()).toReturn(null);
+        moPubInterstitialView = mock(MoPubInterstitial.MoPubInterstitialView.class);
+        stub(moPubInterstitialView.getAdViewController()).toReturn(mockAdViewController);
+        stub(mockAdViewController.getAdReport()).toReturn(mockAdReport);
+        stub(mockMoPubInterstitial.getMoPubInterstitialView()).toReturn(moPubInterstitialView);
+
+        serverExtras = new HashMap<String, String>();
+        serverExtras.put("key", "value");
+
+        subject = new CustomEventInterstitialAdapter(mockMoPubInterstitial, CLASS_NAME, serverExtras, BROADCAST_IDENTIFER, mockAdViewController.getAdReport());
 
         expectedLocalExtras = new HashMap<String, Object>();
         expectedServerExtras = new HashMap<String, String>();
@@ -93,57 +79,52 @@ public class CustomEventInterstitialAdapterTest {
     }
 
     @Test
+    public void constructor_withInvalidClassName_shouldCallOnCustomEventInterstitialFailed() throws Exception {
+        // Remove testing mock and use the real thing
+        CustomEventInterstitialFactory.setInstance(new CustomEventInterstitialFactory());
+
+        new CustomEventInterstitialAdapter(mockMoPubInterstitial, "bad_class_name_11i234jb", new TreeMap<String, String>(), BROADCAST_IDENTIFER, mockAdViewController.getAdReport());
+        verify(mockMoPubInterstitial).onCustomEventInterstitialFailed(ADAPTER_NOT_FOUND);
+    }
+
+    @Test
     public void timeout_shouldSignalFailureAndInvalidateWithDefaultDelay() throws Exception {
         subject.loadInterstitial();
-        Robolectric.idleMainLooper(CustomEventInterstitialAdapter.DEFAULT_INTERSTITIAL_TIMEOUT_DELAY - 1);
+        ShadowLooper.idleMainLooper(CustomEventInterstitialAdapter.DEFAULT_INTERSTITIAL_TIMEOUT_DELAY - 1);
         verify(interstitialAdapterListener, never()).onCustomEventInterstitialFailed(eq(NETWORK_TIMEOUT));
         assertThat(subject.isInvalidated()).isFalse();
 
-        Robolectric.idleMainLooper(1);
+        ShadowLooper.idleMainLooper(1);
         verify(interstitialAdapterListener).onCustomEventInterstitialFailed(eq(NETWORK_TIMEOUT));
         assertThat(subject.isInvalidated()).isTrue();
     }
 
     @Test
     public void timeout_withNegativeAdTimeoutDelay_shouldSignalFailureAndInvalidateWithDefaultDelay() throws Exception {
-        stub(moPubInterstitial.getAdTimeoutDelay()).toReturn(-1);
+        stub(mockMoPubInterstitial.getAdTimeoutDelay()).toReturn(-1);
 
         subject.loadInterstitial();
-        Robolectric.idleMainLooper(CustomEventInterstitialAdapter.DEFAULT_INTERSTITIAL_TIMEOUT_DELAY - 1);
+        ShadowLooper.idleMainLooper(CustomEventInterstitialAdapter.DEFAULT_INTERSTITIAL_TIMEOUT_DELAY - 1);
         verify(interstitialAdapterListener, never()).onCustomEventInterstitialFailed(eq(NETWORK_TIMEOUT));
         assertThat(subject.isInvalidated()).isFalse();
 
-        Robolectric.idleMainLooper(1);
+        ShadowLooper.idleMainLooper(1);
         verify(interstitialAdapterListener).onCustomEventInterstitialFailed(eq(NETWORK_TIMEOUT));
         assertThat(subject.isInvalidated()).isTrue();
     }
 
     @Test
     public void timeout_withNonNullAdTimeoutDelay_shouldSignalFailureAndInvalidateWithCustomDelay() throws Exception {
-        stub(moPubInterstitial.getAdTimeoutDelay()).toReturn(77);
+        stub(mockMoPubInterstitial.getAdTimeoutDelay()).toReturn(77);
 
         subject.loadInterstitial();
-        Robolectric.idleMainLooper(77000 - 1);
+        ShadowLooper.idleMainLooper(77000 - 1);
         verify(interstitialAdapterListener, never()).onCustomEventInterstitialFailed(eq(NETWORK_TIMEOUT));
         assertThat(subject.isInvalidated()).isFalse();
 
-        Robolectric.idleMainLooper(1);
+        ShadowLooper.idleMainLooper(1);
         verify(interstitialAdapterListener).onCustomEventInterstitialFailed(eq(NETWORK_TIMEOUT));
         assertThat(subject.isInvalidated()).isTrue();
-    }
-
-    @Test
-    public void loadInterstitial_shouldHaveEmptyServerExtrasOnInvalidJsonParams() throws Exception {
-        subject = new CustomEventInterstitialAdapter(moPubInterstitial, CLASS_NAME, "{this is terrible JSON");
-        subject.loadInterstitial();
-        expectedLocalExtras.put("Ad-Configuration", null);
-
-        verify(interstitial).loadInterstitial(
-                any(Context.class),
-                eq(subject),
-                eq(expectedLocalExtras),
-                eq(expectedServerExtras)
-        );
     }
 
     @Test
@@ -151,12 +132,13 @@ public class CustomEventInterstitialAdapterTest {
         Location expectedLocation = new Location("");
         expectedLocation.setLongitude(10.0);
         expectedLocation.setLongitude(20.1);
-        stub(moPubInterstitial.getLocation()).toReturn(expectedLocation);
-        subject = new CustomEventInterstitialAdapter(moPubInterstitial, CLASS_NAME, null);
+        stub(mockMoPubInterstitial.getLocation()).toReturn(expectedLocation);
+        subject = new CustomEventInterstitialAdapter(mockMoPubInterstitial, CLASS_NAME, new HashMap<String, String>(), BROADCAST_IDENTIFER, mockAdViewController.getAdReport());
         subject.loadInterstitial();
 
-        expectedLocalExtras.put("Ad-Configuration", null);
-        expectedLocalExtras.put("location", moPubInterstitial.getLocation());
+        expectedLocalExtras.put("broadcastIdentifier", BROADCAST_IDENTIFER);
+        expectedLocalExtras.put(DataKeys.AD_REPORT_KEY, mockAdReport);
+        expectedLocalExtras.put("location", mockMoPubInterstitial.getLocation());
 
         verify(interstitial).loadInterstitial(
                 any(Context.class),
@@ -167,11 +149,11 @@ public class CustomEventInterstitialAdapterTest {
     }
 
     @Test
-    public void loadInterstitial_shouldPropagateJsonParamsInServerExtras() throws Exception {
+    public void loadInterstitial_shouldPropagateServerExtrasToInterstitial() throws Exception {
         subject.loadInterstitial();
-        expectedLocalExtras.put("Ad-Configuration", null);
+        expectedLocalExtras.put("broadcastIdentifier", BROADCAST_IDENTIFER);
+        expectedLocalExtras.put(DataKeys.AD_REPORT_KEY, mockAdReport);
         expectedServerExtras.put("key", "value");
-        expectedServerExtras.put("a different key", "a different value");
 
         verify(interstitial).loadInterstitial(
                 any(Context.class),
@@ -183,37 +165,38 @@ public class CustomEventInterstitialAdapterTest {
 
     @Test
     public void loadInterstitial_shouldScheduleTimeout_interstitialLoadedAndFailed_shouldCancelTimeout() throws Exception {
-        Robolectric.pauseMainLooper();
+        ShadowLooper.pauseMainLooper();
 
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
 
         subject.loadInterstitial();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
 
         subject.onInterstitialLoaded();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
 
         subject.loadInterstitial();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
 
         subject.onInterstitialFailed(null);
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
     }
 
     @Test
     public void loadInterstitial_shouldScheduleTimeoutRunnableBeforeCallingLoadInterstitial() throws Exception {
-        Robolectric.pauseMainLooper();
+        ShadowLooper.pauseMainLooper();
 
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
 
         Answer assertTimeoutRunnableHasStarted = new Answer() {
             @Override
             public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-                assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+                assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
                 return null;
             }
         };
 
+        // noinspection unchecked
         doAnswer(assertTimeoutRunnableHasStarted)
                 .when(interstitial)
                 .loadInterstitial(
@@ -228,18 +211,19 @@ public class CustomEventInterstitialAdapterTest {
 
     @Test
     public void loadInterstitial_whenCallingOnInterstitialFailed_shouldCancelExistingTimeoutRunnable() throws Exception {
-        Robolectric.pauseMainLooper();
+        ShadowLooper.pauseMainLooper();
 
         Answer justCallOnInterstitialFailed = new Answer() {
             @Override
             public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-                assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(1);
+                assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(1);
                 subject.onInterstitialFailed(null);
-                assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+                assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
                 return null;
             }
         };
 
+        // noinspection unchecked
         doAnswer(justCallOnInterstitialFailed)
                 .when(interstitial)
                 .loadInterstitial(
@@ -249,9 +233,9 @@ public class CustomEventInterstitialAdapterTest {
                         any(Map.class)
                 );
 
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
         subject.loadInterstitial();
-        assertThat(Robolectric.getUiThreadScheduler().enqueuedTaskCount()).isEqualTo(0);
+        assertThat(Robolectric.getForegroundThreadScheduler().size()).isEqualTo(0);
     }
 
     @Test
@@ -316,6 +300,7 @@ public class CustomEventInterstitialAdapterTest {
 
         subject.loadInterstitial();
 
+        // noinspection unchecked
         verify(interstitial, never()).loadInterstitial(
                 any(Context.class),
                 any(CustomEventInterstitialListener.class),

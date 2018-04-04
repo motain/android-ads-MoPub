@@ -8,11 +8,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.Shadows;
 
 import static org.fest.assertions.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.robolectric.Robolectric.shadowOf;
 
 @RunWith(RobolectricTestRunner.class)
 public class HttpResponsesTest {
@@ -33,14 +33,7 @@ public class HttpResponsesTest {
 
         assertThat(bitmap).isNotNull();
         assertThat(bitmap).isInstanceOf(Bitmap.class);
-        assertThat(shadowOf(bitmap).getCreatedFromBytes()).isEqualTo(imageData.getBytes());
-    }
-
-    @Test
-    public void asBitmap_withNullResponse_shouldReturnNull() throws Exception {
-        final Bitmap bitmap = HttpResponses.asBitmap(null);
-
-        assertThat(bitmap).isNull();
+        assertThat(Shadows.shadowOf(bitmap).getCreatedFromBytes()).isEqualTo(imageData.getBytes());
     }
 
     @Test

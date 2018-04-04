@@ -3,7 +3,7 @@ package com.mopub.mobileads.test.support;
 import android.content.Context;
 
 import com.mopub.mobileads.factories.VastManagerFactory;
-import com.mopub.mobileads.util.vast.VastManager;
+import com.mopub.mobileads.VastManager;
 
 import static org.mockito.Mockito.mock;
 
@@ -19,7 +19,7 @@ public class TestVastManagerFactory extends VastManagerFactory {
     }
 
     @Override
-    public VastManager internalCreate(final Context context) {
+    public VastManager internalCreate(final Context context, final boolean preCacheVideo) {
         return getTestFactory().mockVastManager;
     }
 }
