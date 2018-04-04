@@ -300,7 +300,10 @@ public class NativeVideoController implements ExoPlayer.EventListener, OnAudioFo
     }
 
     @Override
-    public void onTimelineChanged(Timeline timeline, Object manifest) {}
+    public void onTimelineChanged(Timeline timeline, Object manifest, int reason)
+    {
+
+    }
 
     @Override
     public void onTracksChanged(TrackGroupArray trackGroups, TrackSelectionArray trackSelections) {}
@@ -350,6 +353,18 @@ public class NativeVideoController implements ExoPlayer.EventListener, OnAudioFo
         }
     }
 
+    @Override
+    public void onRepeatModeChanged(int repeatMode)
+    {
+
+    }
+
+    @Override
+    public void onShuffleModeEnabledChanged(boolean shuffleModeEnabled)
+    {
+
+    }
+
     public void seekTo(final long ms) {
         if (mExoPlayer == null) {
             return;
@@ -384,10 +399,19 @@ public class NativeVideoController implements ExoPlayer.EventListener, OnAudioFo
     }
 
     @Override
-    public void onPositionDiscontinuity() {}
+    public void onPositionDiscontinuity(int reason)
+    {
+
+    }
 
     @Override
     public void onPlaybackParametersChanged(PlaybackParameters playbackParameters) {}
+
+    @Override
+    public void onSeekProcessed()
+    {
+
+    }
 
     /**
      * Handles forwarding the user to the specified click through url. Also, fires all unfired

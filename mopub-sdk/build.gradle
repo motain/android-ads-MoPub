@@ -28,6 +28,13 @@ android {
     }
 }
 
+ext {
+    mavenProperties = new Properties()
+    mavenProperties.load(rootProject.file("maven.properties").newReader())
+}
+
+apply from: 'maven-publishing.gradle'
+
 project.description = 'MoPub Android SDK'
 project.ext.displayName = 'MoPub Android SDK'
 project.ext.projectName = 'mopub-sdk'

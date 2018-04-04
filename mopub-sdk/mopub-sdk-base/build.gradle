@@ -25,3 +25,10 @@ project.ext.displayName = 'MoPub Android SDK - Base'
 project.ext.projectName = 'mopub-sdk-base'
 project.ext.uploadName = 'mopub-android-sdk-base'
 apply from: '../publisher.gradle'
+
+ext {
+    mavenProperties = new Properties()
+    mavenProperties.load(rootProject.file("maven.properties").newReader())
+}
+
+apply from: '../maven-publishing.gradle'

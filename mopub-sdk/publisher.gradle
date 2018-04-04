@@ -42,6 +42,11 @@ android.libraryVariants.all { variant ->
         exclude '**/BuildConfig.java'
         exclude '**/R.java'
     }
+
+    task("javadoc${variant.name.capitalize()}Jar", type: Jar, dependsOn: "generate${variant.name.capitalize()}Javadoc") {
+                classifier = 'javadoc'
+               from tasks.getByName("generate${variant.name.capitalize()}Javadoc").destinationDir
+    }
 }
 
 publish {

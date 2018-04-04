@@ -25,4 +25,5 @@ mopub-sample/mopub-sample.iml
 robotium-sample/robotium-sample.iml
 build
 tmp/
+maven.properties
 
