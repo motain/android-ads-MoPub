@@ -33,10 +33,9 @@ ext {
     mavenProperties.load(rootProject.file("maven.properties").newReader())
 }
 
-apply from: 'maven-publishing.gradle'
-
 project.description = 'MoPub Android SDK'
 project.ext.displayName = 'MoPub Android SDK'
 project.ext.projectName = 'mopub-sdk'
 project.ext.uploadName = 'mopub-android-sdk'
-apply from: 'publisher.gradle'
+
+apply from: 'maven-publishing.gradle'

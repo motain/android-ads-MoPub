@@ -8,7 +8,6 @@ project.description = 'MoPub Android SDK - Rewarded Video'
 project.ext.displayName = 'MoPub Android SDK - Rewarded Video'
 project.ext.projectName = 'mopub-sdk-rewardedvideo'
 project.ext.uploadName = 'mopub-android-sdk-rewardedvideo'
-apply from: '../publisher.gradle'
 
 ext {
     mavenProperties = new Properties()
@@ -16,3 +15,6 @@ ext {
 }
 
 apply from: '../maven-publishing.gradle'
+android {
+    buildToolsVersion '27.0.3'
+}

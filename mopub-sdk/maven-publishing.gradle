@@ -1,5 +1,7 @@
 apply plugin: 'maven-publish'
 
+import org.gradle.api.publish.maven.MavenPublication
+
 task androidJavadocs(type: Javadoc) {
     source = android.sourceSets.main.java.srcDirs
     classpath += project.files(android.getBootClasspath().join(File.pathSeparator))
@@ -39,7 +41,7 @@ publishing {
             version = project.version
 
             artifact bundleRelease
-            artifact javadocReleaseJar      // used in this project instead of androidJavadocJar
+            //artifact javadocReleaseJar      // used in this project instead of androidJavadocJar
             artifact androidSourcesJar
 
             pom.withXml {
@@ -50,6 +52,10 @@ publishing {
                         def depGroup = dep.dependencyProject.group
                         def depName = dep.dependencyProject.name
                         def depVersion = dep.dependencyProject.version
+                    } else if (dep instanceof ModuleDependency) {
+                        def depGroup = dep.group
+                        def depName = dep.name
+                        def depVersion = dep.version
                     } else {
                         if (dep.group == null || dep.version == null || dep.name == null || dep.name == "unspecified")
                             return // ignore invalid dependencies
