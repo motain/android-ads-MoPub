@@ -11,7 +11,7 @@ repositories {
 }
 
 project.group = 'com.mopub'
-project.version = '4.20.0'
+project.version = '4.20.1-OF'
 
 android {
     compileSdkVersion 26
@@ -64,9 +64,9 @@ android {
                     project(':mopub-sdk').file('proguard.txt')
         }
 
-        debug {
-            minifyEnabled false
-        }
+//        debug {
+//            minifyEnabled false
+//        }
     }
 
     // Note: You will also need a local.properties file to set the location of the SDK in the same
