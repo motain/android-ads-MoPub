@@ -1,4 +1,5 @@
 repositories {
+    google()
     jcenter()
     flatDir {
         dirs '../libs'
@@ -11,7 +12,7 @@ apply plugin: 'com.android.application'
 
 project.group = 'com.mopub'
 project.description = '''MoPub Sample App'''
-project.version = '5.0.0'
+project.version = '5.2.0'
 
 android {
     compileSdkVersion 26
@@ -19,7 +20,7 @@ android {
     lintOptions { abortOnError false }
 
     defaultConfig {
-        versionCode 59
+        versionCode 62
         versionName version
         minSdkVersion 16
         targetSdkVersion 26
